@@ -1,0 +1,5 @@
+# 캐시 파일
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
