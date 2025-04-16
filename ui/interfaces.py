@@ -1,6 +1,7 @@
 import gradio as gr
 import numpy as np
 from PIL import Image
+from inference.quality_models import check_model_status
 
 # 공통 이미지 입력 컴포넌트 생성 함수
 def create_common_image_input(label="입력 이미지"):
@@ -28,10 +29,31 @@ def create_common_image_input(label="입력 이미지"):
         max-height: 400px !important;
         object-fit: contain !important;
     }
+    .error-message {
+        background-color: #fff3cd;
+        color: #856404;
+        padding: 10px;
+        border-radius: 5px;
+        border: 1px solid #ffeeba;
+        margin: 10px 0;
+        font-weight: bold;
+    }
     </style>
     """)
     
     return input_image, style_html
+
+# 오류 메시지 HTML 생성 함수
+def create_error_html(error_msg):
+    """에러 메시지를 HTML로 포맷팅"""
+    if error_msg:
+        return f"""
+        <div class="error-message">
+            {error_msg}
+        </div>
+        """
+    else:
+        return ""
 
 # 모델 출력 후처리 함수 - 여러 이미지 처리
 def process_output_images(images):
@@ -58,6 +80,9 @@ def create_model_interface_type1(inference_fn, tab_name, is_template=False):
         # 버튼 생성 - 항상 활성화 상태
         submit_btn = gr.Button(f"{tab_name} 실행")
         
+        # 에러 메시지 표시 컴포넌트
+        error_html = gr.HTML("")
+        
         # 갤러리 설정 개선
         output_gallery = gr.Gallery(
             label="출력 이미지", 
@@ -74,14 +99,27 @@ def create_model_interface_type1(inference_fn, tab_name, is_template=False):
         
         # 모델 결과 처리를 위한 래퍼 함수
         def model_wrapper(image, text):
-            # 이미지는 그대로 전달
-            output_images, bm25, style = inference_fn(image, text)
-            return output_images, bm25, style
+            try:
+                # 이미지는 그대로 전달
+                result = inference_fn(image, text)
+                
+                # 결과가 tuple이고 길이가 3이면 에러 메시지 포함
+                if isinstance(result, tuple) and len(result) == 3:
+                    output_images, bm25, style = result[:2]
+                    error_msg = result[2]
+                    return output_images, bm25, style, create_error_html(error_msg)
+                else:
+                    output_images, bm25, style = result
+                    return output_images, bm25, style, ""
+            except Exception as e:
+                # 예상치 못한 오류 처리
+                error_msg = f"⚠️ 처리 중 오류 발생: {str(e)}"
+                return [], 0, 0, create_error_html(error_msg)
         
         submit_btn.click(
             fn=model_wrapper,
             inputs=[input_image, input_text],
-            outputs=[output_gallery, bm25_score, style_score]
+            outputs=[output_gallery, bm25_score, style_score, error_html]
         )
 
 def create_model_interface_type2(inference_fn, tab_name, score_label="유사도 점수", is_template=True):
@@ -93,6 +131,9 @@ def create_model_interface_type2(inference_fn, tab_name, score_label="유사도 
         )
         
         submit_btn = gr.Button(f"{tab_name} 실행")
+        
+        # 에러 메시지 표시 컴포넌트
+        error_html = gr.HTML("")
         
         # 갤러리 설정 개선
         output_gallery = gr.Gallery(
@@ -108,14 +149,27 @@ def create_model_interface_type2(inference_fn, tab_name, score_label="유사도 
         
         # 모델 결과 처리를 위한 래퍼 함수
         def model_wrapper(image):
-            # 모델 실행
-            output_images, score = inference_fn(image)
-            return output_images, score
+            try:
+                # 모델 실행
+                result = inference_fn(image)
+                
+                # 결과가 tuple이고 길이가 3이면 에러 메시지 포함
+                if isinstance(result, tuple) and len(result) == 3:
+                    output_images, score = result[:2]
+                    error_msg = result[2]
+                    return output_images, score, create_error_html(error_msg)
+                else:
+                    output_images, score = result
+                    return output_images, score, ""
+            except Exception as e:
+                # 예상치 못한 오류 처리
+                error_msg = f"⚠️ 처리 중 오류 발생: {str(e)}"
+                return [], 0, create_error_html(error_msg)
         
         submit_btn.click(
             fn=model_wrapper,
             inputs=[input_image],
-            outputs=[output_gallery, similarity_score]
+            outputs=[output_gallery, similarity_score, error_html]
         )
 
 def create_model_interface_type3(inference_fn, tab_name, score_label="품질 점수", is_template=False):
@@ -126,7 +180,38 @@ def create_model_interface_type3(inference_fn, tab_name, score_label="품질 점
             label="입력 이미지 (템플릿)" if is_template else "입력 이미지 (요소)"
         )
         
+        with gr.Row():
+            # 모델 로드 버튼과 상태 표시 추가
+            load_model_btn = gr.Button("모델 로드", variant="primary")
+            model_status = gr.Textbox(label="모델 상태", value="모델이 로드되지 않았습니다.", interactive=False)
+        
+        # 모델 로드 버튼 클릭 이벤트 처리
+        def load_model_fn():
+            from inference.quality_models import load_model
+            success, message = load_model()
+            status_msg = f"✅ {message}" if success else f"❌ {message}"
+            return status_msg
+            
+        # 모델 상태 확인 함수
+        def check_model_status_fn():
+            loaded, message = check_model_status()
+            status_msg = f"✅ {message}" if loaded else f"❌ {message}"
+            return status_msg
+        
+        # 페이지 로드 시 모델 상태 확인
+        model_status.value = check_model_status_fn()
+        
+        # 모델 로드 버튼 클릭 이벤트 연결
+        load_model_btn.click(
+            fn=load_model_fn,
+            inputs=[],
+            outputs=[model_status]
+        )
+        
         submit_btn = gr.Button(f"{tab_name} 실행")
+        
+        # 에러 메시지 표시 컴포넌트
+        error_html = gr.HTML("")
         
         with gr.Row():
             quality_score = gr.Number(label=score_label)
@@ -134,14 +219,31 @@ def create_model_interface_type3(inference_fn, tab_name, score_label="품질 점
         
         # 모델 결과 처리를 위한 래퍼 함수
         def model_wrapper(image):
-            # 모델 실행
-            score, label = inference_fn(image)
-            return score, label
+            try:
+                # 모델 실행 전 상태 확인
+                loaded, message = check_model_status()
+                if not loaded:
+                    return 0, "모델 미로드", create_error_html("⚠️ 모델이 로드되지 않았습니다. '모델 로드' 버튼을 클릭하세요.")
+                
+                # 모델 실행
+                result = inference_fn(image)
+                
+                # 결과가 tuple이고 길이가 3이면 에러 메시지 포함
+                if isinstance(result, tuple) and len(result) == 3:
+                    score, label, error_msg = result
+                    return score, label, create_error_html(error_msg)
+                else:
+                    score, label = result
+                    return score, label, ""
+            except Exception as e:
+                # 예상치 못한 오류 처리
+                error_msg = f"⚠️ 처리 중 오류 발생: {str(e)}"
+                return 0, "오류", create_error_html(error_msg)
         
         submit_btn.click(
             fn=model_wrapper,
             inputs=[input_image],
-            outputs=[quality_score, result_label]
+            outputs=[quality_score, result_label, error_html]
         )
 
 def create_model_interface_type4(inference_fn, tab_name, is_template=False):
@@ -155,16 +257,30 @@ def create_model_interface_type4(inference_fn, tab_name, is_template=False):
         keywords = gr.Textbox(label="키워드 리스트 (쉼표로 구분)", value="디자인,로고,아이콘,배너")
         submit_btn = gr.Button(f"{tab_name} 실행")
         
+        # 에러 메시지 표시 컴포넌트
+        error_html = gr.HTML("")
+        
         output_scores = gr.JSON(label="키워드별 점수")
         
         # 모델 결과 처리를 위한 래퍼 함수
         def model_wrapper(image, keywords):
-            # 모델 실행
-            scores = inference_fn(image, keywords)
-            return scores
+            try:
+                # 모델 실행
+                result = inference_fn(image, keywords)
+                
+                # 결과가 tuple이고 길이가 2이면 에러 메시지 포함
+                if isinstance(result, tuple) and len(result) == 2:
+                    scores, error_msg = result
+                    return scores, create_error_html(error_msg)
+                else:
+                    return result, ""
+            except Exception as e:
+                # 예상치 못한 오류 처리
+                error_msg = f"⚠️ 처리 중 오류 발생: {str(e)}"
+                return {}, create_error_html(error_msg)
         
         submit_btn.click(
             fn=model_wrapper,
             inputs=[input_image, keywords],
-            outputs=[output_scores]
+            outputs=[output_scores, error_html]
         )
