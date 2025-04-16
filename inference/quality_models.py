@@ -7,12 +7,20 @@ from PIL import Image
 import time
 from transformers import AutoImageProcessor
 from datetime import datetime
+from transformers import Blip2VisionConfig
+from models.blip_v2_model_inference import BlipV2ModelInference
 
 # 글로벌 변수로 모델과 프로세서 관리
 _model = None
 _processor = None
 _device = None
 _model_path = '/app/data/element_low_quality_designhub_dataset/trained_model_weights/sojang-designhub-Light-BLIP-V2-250403'
+
+backbone_name = 'BLIP-V2'
+element_image_path = '/app/data/element_low_quality_designhub_dataset/images'
+file_path = '/app/data/s3_dataset/file_miricanvas_com/raster_image_thumb/2024/09/10/16/30/kn9a234altz19oth/sticker_thumb_400.webp'
+logit_scale_init_value = 2.6592
+class_num = 2
 
 def _load_model_if_needed():
     """필요할 때만 모델을 로드하는 함수"""
@@ -25,32 +33,19 @@ def _load_model_if_needed():
             # GPU 사용 가능 여부 확인
             _device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
             
-            # 필요한 라이브러리 임포트
-            from transformers import Blip2VisionConfig
-            
-            try:
-                # 로컬 모듈에서 모델 클래스 임포트 시도
-                from models import BlipV2ModelInference
-            except ImportError:
-                # 로컬 모듈 임포트 실패 시 직접 임포트
-                import sys
-                import os
-                sys.path.append('/data/element_low_quality_designhub_dataset')
-                from models import BlipV2ModelInference
-            
             # 모델 설정 및 로드
             config = Blip2VisionConfig()
-            config.logit_scale_init_value = 2.6592
+            config.logit_scale_init_value = logit_scale_init_value
             
             _model = BlipV2ModelInference.from_pretrained(
                 f'{_model_path}/model_checkpoint.pth',
                 _device,
                 config=config,
-                num_labels=2
+                num_labels=class_num
             )
             
             # 프로세서 로드
-            _processor = AutoImageProcessor.from_pretrained(_model_path)
+            _processor = AutoImageProcessor.from_pretrained(_model_path, use_fast=True)
             
             # 모델을 평가 모드로 설정
             _model.to(_device)
@@ -67,29 +62,32 @@ def _load_model_if_needed():
     
     return True
 
-def _read_image(image_path_or_obj):
-    """이미지 파일 또는 객체를 로드하고 전처리하는 함수"""
+def _read_image(image_path_or_obj) -> tuple[Image.Image, Image.Image]:
     try:
-        # 이미지 경로인 경우 파일을 열기
+        # 이미지 경로 또는 객체 처리
         if isinstance(image_path_or_obj, str):
+            print(f"[{datetime.now()}] 이미지 경로: {image_path_or_obj}")
             img = Image.open(image_path_or_obj)
         else:
-            # 이미 이미지 객체인 경우 그대로 사용
+            print(f"[{datetime.now()}] 이미지 객체 사용")
             img = image_path_or_obj
             
-        # RGBA 이미지를 RGB로 변환
-        if img.mode == 'RGBA':
-            rgb_img = img.convert('RGB')
-        else:
-            rgb_img = img.convert('RGB')
-            
-        return rgb_img
+        # RGBA 모드로 변환
+        img = img.convert('RGBA')
+        
+        # 알파 채널 추출
+        alpha_img = img.split()[-1]
+        
+        # RGB 모드로 변환
+        rgb_img = img.convert('RGB')
+        
+        return rgb_img, alpha_img
     except Exception as e:
         print(f"이미지 로드 중 오류: {e}")
-        return None
+        return None, None
 
-# 디자인 허브 측면 저퀄리티 분류 모델
-def design_hub_low_quality_inference(image, text=None):
+# 디자인 허브 측면 저퀄리티 분류 모델 -> quality_score, label
+def design_hub_low_quality_inference(image_path, text=None) -> tuple[int, str]:
     """
     디자인 허브 저퀄리티 분류 모델을 사용하여 이미지 품질을 평가
     
@@ -110,7 +108,7 @@ def design_hub_low_quality_inference(image, text=None):
     try:
         # 이미지 전처리
         start_time = time.time()
-        rgb_image = _read_image(image)
+        rgb_image, alpha_image = _read_image(image_path)
         
         if rgb_image is None:
             raise ValueError("이미지를 읽을 수 없습니다.")
