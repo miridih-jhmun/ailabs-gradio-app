@@ -1,4 +1,4 @@
-# Grado App - 모델 성능 평가를 위한 Gradio 앱
+# Grado App - 모델 성능 평가를 위한 Gradio 앱 - Server 2
 
 다양한 이미지 처리 모델의 성능을 평가하기 위한 Gradio 기반 웹 앱입니다.
 
