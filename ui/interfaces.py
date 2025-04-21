@@ -67,6 +67,7 @@ def process_output_images(images):
     return processed_images
 
 # UI 구성 함수 - 모델 유형에 따라 다른 인터페이스 생성
+# is_template: 입력 이미지가 template이면 True, 요소이면 False
 def create_model_interface_type1(inference_fn, tab_name, is_template=False):
     # 비슷한 스타일 찾기, 스타일 찾기 (이미지, 텍스트 → 이미지들, BM25점수, 스타일점수)
     with gr.Column():

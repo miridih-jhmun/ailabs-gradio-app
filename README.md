@@ -17,6 +17,3 @@ pip install -r requirements.txt
 # 앱 실행
 python app.py
 ```
-
-## 모델 사용 방법
-각 모델은 인터페이스를 통해 쉽게 사용할 수 있습니다.
