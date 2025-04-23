@@ -19,6 +19,10 @@ from ui.interfaces import (
     create_model_interface_type3, 
     create_model_interface_type4
 )
+from setproctitle import setproctitle
+
+# 프로세스 이름 설정
+setproctitle("MIRIDIH_MHJ")
 
 # Gradio 인터페이스 생성
 with gr.Blocks() as demo:
